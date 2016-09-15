@@ -2,86 +2,71 @@ module MailgunRails
   class Deliverer
 
     attr_accessor :settings
+    attr_reader :domain, :api_key
 
     def initialize(settings)
       self.settings = settings
-    end
-
-    def domain
-      self.settings[:domain]
-    end
-
-    def api_key
-      self.settings[:api_key]
+      self.domain = settings[:domain]
+      self.api_key = settings[:api_key]
     end
 
     def deliver!(rails_message)
-      response = mailgun_client.send_message build_mailgun_message_for(rails_message)
+      response = mailgun_client.send_message(domain, build_mailgun_message(rails_message))
+
       if response.code == 200
         mailgun_message_id = JSON.parse(response.to_str)["id"]
         rails_message.message_id = mailgun_message_id
       end
+
       response
     end
 
     def serialize(rails_message)
-      build_mailgun_message_for rails_message
+      build_mailgun_message(rails_message).message
     end
 
-    def deliver_serialized_mail(serialized_mail)
-      mailgun_client.send_message serialized_mail
+    def deliver_serialized_mail(serialized_message)
+      mailgun_client.send_message(serialized_message)
     end
 
     private
 
-    def build_mailgun_message_for(rails_message)
-      mailgun_message = build_basic_mailgun_message_for rails_message
-      transform_mailgun_attributes_from_rails rails_message, mailgun_message
-      remove_empty_values mailgun_message
+    def build_mailgun_message(rails_message)
+      mb_obj = Mailgun::MessageBuilder.new
 
-      mailgun_message
-    end
-
-    def transform_mailgun_attributes_from_rails(rails_message, mailgun_message)
-      transform_reply_to rails_message, mailgun_message if rails_message.reply_to
-      transform_mailgun_variables rails_message, mailgun_message
-      transform_mailgun_options rails_message, mailgun_message
-      transform_mailgun_recipient_variables rails_message, mailgun_message
-      transform_custom_headers rails_message, mailgun_message
-    end
-
-    def build_basic_mailgun_message_for(rails_message)
-      mailgun_message = {
-       from: rails_message[:from].formatted,
-       to: rails_message[:to].formatted,
-       subject: rails_message.subject,
-       html: extract_html(rails_message),
-       text: extract_text(rails_message)
-      }
-
+      mb_obj.from(rails_message[:from].formatted)
+      mb_obj.add_recipient('h:reply-to', rails_message[:reply_to].formatted.first) if rails_message[:reply_to]
+      mb_obj.add_recipient(:to, rails_message[:to].formatted)
       [:cc, :bcc].each do |key|
-        mailgun_message[key] = rails_message[key].formatted if rails_message[key]
+        mb_obj.add_recipient(key, rails_message[key].formatted) if rails_message[key]
+      end
+      mb_obj.subject(rails_message.subject)
+      mb_obj.body_text(extract_text(rails_message))
+      mb_obj.body_html(extract_html(rails_message))
+
+      rails_message.mailgun_variables.try(:each) do |name, value|
+        mb_obj.add_custom_parameter("v:#{name}", value)
       end
 
-      return mailgun_message if rails_message.attachments.empty?
+      rails_message.mailgun_options.try(:each) do |name, value|
+        mb_obj.add_custom_parameter("o:#{name}", value)
+      end
 
-      # RestClient requires attachments to be in file format, use a temp directory and the decoded attachment
-      mailgun_message[:attachment] = []
-      mailgun_message[:inline] = []
-      rails_message.attachments.each do |attachment|
-        # then add as a file object
-        if attachment.inline?
-          mailgun_message[:inline] << MailgunRails::Attachment.new(attachment, encoding: 'ascii-8bit', inline: true)
-        else
-          mailgun_message[:attachment] << MailgunRails::Attachment.new(attachment, encoding: 'ascii-8bit')
+      rails_message.mailgun_headers.try(:each) do |name, value|
+        mb_obj.add_custom_parameter("h:#{name}", value)
+      end
+
+      if rails_message.attachments.any?
+        rails_message.attachments.each do |attachment|
+          if attachment.inline?
+            add_inline_image(attachment)
+          else
+            mb_obj.add_attachment(attachment)
+          end
         end
       end
 
-      return mailgun_message
-    end
-
-    def transform_reply_to(rails_message, mailgun_message)
-      mailgun_message['h:Reply-To'] = rails_message[:reply_to].formatted.first
+      mb_obj
     end
 
     # @see http://stackoverflow.com/questions/4868205/rails-mail-getting-the-body-as-plain-text
@@ -101,34 +86,8 @@ module MailgunRails
       end
     end
 
-    def transform_mailgun_variables(rails_message, mailgun_message)
-      rails_message.mailgun_variables.try(:each) do |name, value|
-        mailgun_message["v:#{name}"] = value
-      end
-    end
-
-    def transform_mailgun_options(rails_message, mailgun_message)
-      rails_message.mailgun_options.try(:each) do |name, value|
-        mailgun_message["o:#{name}"] = value
-      end
-    end
-
-    def transform_custom_headers(rails_message, mailgun_message)
-      rails_message.mailgun_headers.try(:each) do |name, value|
-        mailgun_message["h:#{name}"] = value
-      end
-    end
-
-    def transform_mailgun_recipient_variables(rails_message, mailgun_message)
-      mailgun_message['recipient-variables'] = rails_message.mailgun_recipient_variables.to_json if rails_message.mailgun_recipient_variables
-    end
-
-    def remove_empty_values(mailgun_message)
-      mailgun_message.delete_if { |key, value| value.nil? }
-    end
-
     def mailgun_client
-      @mailgun_client ||= Client.new(api_key, domain)
+      @mailgun_client ||= Mailgun::Client.new(api_key)
     end
   end
 end
