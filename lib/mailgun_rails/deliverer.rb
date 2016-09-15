@@ -24,6 +24,14 @@ module MailgunRails
       response
     end
 
+    def serialize(rails_message)
+      build_mailgun_message_for rails_message
+    end
+
+    def deliver_serialized_mail(serialized_mail)
+      mailgun_client.send_message serialized_mail
+    end
+
     private
 
     def build_mailgun_message_for(rails_message)
