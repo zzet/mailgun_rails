@@ -6,7 +6,12 @@ module Mail
     attr_accessor :mailgun_headers
 
     def serialize
-      delivery_method.serialize(self)
+      if delivery_method.respond_to?(:serialize)
+        delivery_method.serialize(self)
+      else
+        instance = MailgunRails::Deliverer.new(ActionMailer::Base.mailgun_settings)
+        instance.serialize(self)
+      end
     end
   end
 end
