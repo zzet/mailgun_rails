@@ -2,12 +2,17 @@ module MailgunRails
   class Deliverer
 
     attr_accessor :settings
-    attr_reader :domain, :api_key
 
     def initialize(settings)
       self.settings = settings
-      self.domain = settings[:domain]
-      self.api_key = settings[:api_key]
+    end
+
+    def domain
+      self.settings[:domain]
+    end
+
+    def api_key
+      self.settings[:api_key]
     end
 
     def deliver!(rails_message)
@@ -23,10 +28,6 @@ module MailgunRails
 
     def serialize(rails_message)
       build_mailgun_message(rails_message).message
-    end
-
-    def deliver_serialized_mail(serialized_message)
-      mailgun_client.send_message(serialized_message)
     end
 
     private
