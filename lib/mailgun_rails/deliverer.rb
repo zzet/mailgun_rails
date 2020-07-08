@@ -19,7 +19,7 @@ module MailgunRails
       response = mailgun_client.send_message(domain, build_mailgun_message(rails_message))
 
       if response.code == 200
-        mailgun_message_id = JSON.parse(response.to_str)["id"]
+        mailgun_message_id = JSON.parse(response.body.to_s)['id']
         rails_message.message_id = mailgun_message_id
       end
 
@@ -35,12 +35,14 @@ module MailgunRails
     def build_mailgun_message(rails_message)
       mb_obj = Mailgun::MessageBuilder.new
 
-      mb_obj.from(rails_message[:from].formatted)
+      mb_obj.from(rails_message[:from].formatted.first)
       mb_obj.add_recipient('h:reply-to', rails_message[:reply_to].formatted.first) if rails_message[:reply_to]
-      mb_obj.add_recipient(:to, rails_message[:to].formatted)
-      [:cc, :bcc].each do |key|
-        mb_obj.add_recipient(key, rails_message[key].formatted) if rails_message[key]
+      mb_obj.add_recipient(:to, rails_message[:to].formatted.first)
+
+      %i(cc bcc).each do |key|
+        mb_obj.add_recipient(key, rails_message[key].formatted.first) if rails_message[key]
       end
+
       mb_obj.subject(rails_message.subject)
       mb_obj.body_text(extract_text(rails_message))
       mb_obj.body_html(extract_html(rails_message))
